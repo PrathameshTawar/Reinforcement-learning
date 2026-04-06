@@ -1,104 +1,217 @@
 """
-Email RL Environment - Models
-Defines all Pydantic schemas and enum structures representing the state
-and configuration of the simulation.
+AIM-Env Models — Single source of truth for all types.
+Matches SYSTEM_CONTRACT.md exactly.
 """
-
-from pydantic import BaseModel, Field
-from typing import List, Optional
+from __future__ import annotations
+from pydantic import BaseModel, Field, field_validator, ConfigDict
+from typing import Dict, List, Optional
 from enum import Enum
 
+
+# ---------------------------------------------------------------------------
+# Enumerations
+# ---------------------------------------------------------------------------
+
+class ActionType(str, Enum):
+    OPEN_EMAIL  = "open_email"
+    READ_FULL   = "read_full"
+    CLASSIFY    = "classify"
+    PRIORITIZE  = "prioritize"
+    ROUTE       = "route"
+    DEFER       = "defer"
+    MARK_SPAM   = "mark_spam"
+    ESCALATE    = "escalate"
+    SUBMIT      = "submit"
+
+
 class EmailCategory(str, Enum):
-    """Categories assigned to emails for processing classification."""
-    urgent = "urgent"
-    normal = "normal"
-    spam = "spam"
-    promotions = "promotions"
-    social = "social"
-    updates = "updates"
-    forums = "forums"
+    URGENT     = "urgent"
+    NORMAL     = "normal"
+    SPAM       = "spam"
+    PHISHING   = "phishing"
+    NEWSLETTER = "newsletter"
+    INTERNAL   = "internal"
+    EXTERNAL   = "external"
+
 
 class PriorityLevel(str, Enum):
-    """Triage priority levels representing urgency or importance."""
-    low = "low"
-    medium = "medium"
-    high = "high"
-    critical = "critical"
+    CRITICAL = "critical"
+    HIGH     = "high"
+    MEDIUM   = "medium"
+    LOW      = "low"
 
-class RouteOption(str, Enum):
-    """End-state destinations for parsed emails."""
-    inbox = "inbox"
-    archive = "archive"
-    trash = "trash"
-    escalate = "escalate"
-    review = "review"
+
+class RouteAction(str, Enum):
+    ARCHIVE = "archive"
+    DELETE  = "delete"
+    FORWARD = "forward"
+    REPLY   = "reply"
+    FLAG    = "flag"
+    IGNORE  = "ignore"
+
+
+# ---------------------------------------------------------------------------
+# Shared Constants
+# ---------------------------------------------------------------------------
+
+ADJACENT_CATEGORIES: frozenset = frozenset({
+    frozenset({"urgent",     "normal"}),
+    frozenset({"spam",       "phishing"}),
+    frozenset({"newsletter", "internal"}),
+    frozenset({"internal",   "external"}),
+})
+
+PRIORITY_ORDER: Dict[str, int] = {
+    "critical": 0,
+    "high":     1,
+    "medium":   2,
+    "low":      3,
+}
+
+PHISHING_ENGAGE_ROUTES: frozenset = frozenset({"reply", "forward"})
+
+
+# ---------------------------------------------------------------------------
+# Data Models
+# ---------------------------------------------------------------------------
 
 class Action(BaseModel):
-    """
-    Action space provided by the generic Agent interacting with the environment.
-    Types can be: 'open', 'classify', 'detect_phishing', 'submit'
-    """
-    type: str = Field(description="The generic operation type to perform.")
-    email_id: Optional[str] = Field(default=None, description="The targeted email unique identifier.")
-    category: Optional[EmailCategory] = Field(default=None, description="The category classification assigned.")
-    priority: Optional[PriorityLevel] = Field(default=None, description="The priority classification assigned.")
-    route: Optional[RouteOption] = Field(default=None, description="The destination route assigned.")
+    action_type:  ActionType
+    email_id:     Optional[str]           = None
+    category:     Optional[EmailCategory] = None
+    priority:     Optional[PriorityLevel] = None
+    route_action: Optional[RouteAction]   = None
+
+
+class ActionResult(BaseModel):
+    success: bool
+    message: str
+    reward:  float
+
 
 class EmailPartial(BaseModel):
-    """Structure for emails visible from the inbox viewport."""
-    id: str = Field(description="Unique email identifier.")
-    subject: str = Field(description="Email subject line.")
-    sender: str = Field(description="Original sender email address.")
-    preview: str = Field(description="Initial text preview excerpt (max 50 chars).")
+    email_id:       str
+    sender_name:    str
+    sender_domain:  str
+    subject:        str
+    preview:        str   # exactly first 120 chars of body
+    has_attachment: bool
+    timestamp:      str   # "YYYY-MM-DD HH:MM"
+
 
 class EmailFull(EmailPartial):
-    """Fully parsed email content visible only when explicitly 'opened'."""
-    body: str = Field(description="The complete email body content.")
+    body:             str
+    links:            List[str]
+    attachment_names: List[str]
+    reply_to:         str
+
 
 class EmailGroundTruth(BaseModel):
-    """
-    Simulated reality. Absolute ground truth metrics governing the true
-    attributes of generated emails. Absolutely hidden from the agent.
-    """
-    id: str = Field(description="Target mapped email identifier.")
-    is_phishing: bool = Field(description="Whether the email contains malicious intent.")
-    true_category: EmailCategory = Field(description="The true intrinsic category.")
-    true_priority: PriorityLevel = Field(description="The intrinsic priority requirements.")
-    true_route: RouteOption = Field(description="The optimal destination for correct triage.")
+    email_id:      str
+    true_category: EmailCategory
+    true_priority: PriorityLevel
+    is_phishing:   bool
+    deadline_step: Optional[int] = None
+    correct_route: RouteAction
+
 
 class Observation(BaseModel):
-    """
-    The observation state vector provided back to the agent detailing
-    everything currently visible and known at the current step threshold.
-    """
-    inbox: List[EmailPartial] = Field(description="Emails currently visible in the inbox.")
-    opened: List[str] = Field(description="List of currently opened email IDs.")
-    time_left: int = Field(description="Remaining time units before deadline failure.")
-    step_count: int = Field(description="Current internal step tracker count.")
-    pending_emails: int = Field(description="Total count of emails remaining unread/unprocessed.")
-    alerts: List[str] = Field(default_factory=list, description="Any critical environment-level alerts or warnings.")
-    classified: int = Field(description="Count mapping of successfully assigned categories.")
-    prioritized: int = Field(description="Count mapping of successfully assigned priorities.")
-    routed: int = Field(description="Count mapping of successfully routed emails.")
+    model_config = ConfigDict(arbitrary_types_allowed=False)
+
+    inbox:              List[EmailPartial]           = Field(default_factory=list)
+    opened_emails:      Dict[str, EmailFull]         = Field(default_factory=dict)
+    time_step:          int
+    max_time_steps:     int
+    pending_emails:     List[str]                    = Field(default_factory=list)
+    last_action_result: Optional[ActionResult]       = None
+    classified:         Dict[str, str]               = Field(default_factory=dict)
+    prioritized:        Dict[str, str]               = Field(default_factory=dict)
+    routed:             Dict[str, str]               = Field(default_factory=dict)
+    deferred:           List[str]                    = Field(default_factory=list)
+    escalated:          List[str]                    = Field(default_factory=list)
+    marked_spam:        List[str]                    = Field(default_factory=list)
+    alerts:             List[str]                    = Field(default_factory=list)
+
+    def summary(self) -> str:
+        lines = [
+            f"=== INBOX TRIAGE — Step {self.time_step}/{self.max_time_steps} ===",
+            f"Pending: {len(self.pending_emails)} emails | "
+            f"Classified: {len(self.classified)} | Prioritized: {len(self.prioritized)} | "
+            f"Routed: {len(self.routed)} | Spam: {len(self.marked_spam)} | "
+            f"Escalated: {len(self.escalated)}",
+        ]
+        if self.alerts:
+            lines.append("ALERTS: " + " | ".join(self.alerts))
+        lines.append("\n--- INBOX ---")
+        for e in self.inbox:
+            status = "OPENED" if e.email_id in self.opened_emails else "UNREAD"
+            lines.append(
+                f"[{status}] {e.email_id} | From: {e.sender_name} <{e.sender_domain}> "
+                f"| Subject: {e.subject} | Preview: {e.preview[:80]}"
+            )
+        if self.opened_emails:
+            lines.append("\n--- FULL CONTENT ---")
+            for eid, ef in self.opened_emails.items():
+                lines.append(
+                    f"[{eid}] Body: {ef.body} | Links: {ef.links} "
+                    f"| Reply-To: {ef.reply_to}"
+                )
+        return "\n".join(lines)
+
+
+class Reward(BaseModel):
+    value:      float
+    components: Dict[str, float]
+
 
 class TaskConfig(BaseModel):
-    """Configuration mapping configuring difficulty and randomization."""
-    num_emails: int = Field(description="Total quantity of emails to generate.")
-    time_budget: int = Field(description="Length constraint imposed upon agent lifespan.")
-    seed: int = Field(description="Random initialization seed ensuring deterministic environments.")
-    ambiguity_level: float = Field(default=0.0, description="Noise parameter defining missing email context probability.")
-    has_phishing: bool = Field(default=False, description="Flag indicating presence of adversarial phishing content.")
-    time_pressure: float = Field(default=0.0, description="Multiplicative modifier to step consumption.")
+    model_config = ConfigDict(frozen=True)
+
+    task_id:         str
+    seed:            int
+    num_emails:      int
+    max_steps:       int
+    ambiguity_level: float
+    has_phishing:    bool
+    time_pressure:   bool
+
+    @field_validator("ambiguity_level")
+    @classmethod
+    def check_ambiguity(cls, v: float) -> float:
+        if not (0.0 <= v <= 1.0):
+            raise ValueError("ambiguity_level must be in [0.0, 1.0]")
+        return v
+
+    @field_validator("num_emails")
+    @classmethod
+    def check_num_emails(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("num_emails must be >= 1")
+        return v
+
+    @field_validator("max_steps")
+    @classmethod
+    def check_max_steps(cls, v: int) -> int:
+        if v < 5:
+            raise ValueError("max_steps must be >= 5")
+        return v
+
+    @field_validator("seed")
+    @classmethod
+    def check_seed(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("seed must be a positive integer")
+        return v
+
 
 class EpisodeResult(BaseModel):
-    """The aggregate end-of-episode simulation final evaluation layout."""
-    score: float = Field(description="Final computed grade output index.")
-    steps: int = Field(description="Final number of steps consumed.")
-    correct_classifications: int = Field(description="Sum of absolute correct category assignments.")
-    phishing_detected: int = Field(description="Sum of absolute positive phishing assertions caught.")
-    efficiency: float = Field(description="Computed time-efficiency normalized representation.")
-    classification_acc: float = Field(default=0.0, description="Normalized 0-1 category assignment grade.")
-    priority_acc: float = Field(default=0.0, description="Normalized 0-1 priority assignment grade.")
-    routing_acc: float = Field(default=0.0, description="Normalized 0-1 routing assignment grade.")
-    risk_score: float = Field(default=0.0, description="Normalized 0-1 risk isolation grade.")
-    efficiency_score: float = Field(default=0.0, description="Normalized 0-1 temporal efficiency grade.")
+    task_id:            str
+    final_score:        float
+    classification_acc: float
+    priority_acc:       float
+    routing_acc:        float
+    risk_score:         float
+    efficiency_score:   float
+    steps_used:         int
+    phishing_caught:    int
+    phishing_engaged:   int
