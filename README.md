@@ -1,3 +1,15 @@
+---
+title: Aim Email Triage
+emoji: 📧
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+tags:
+  - openenv
+---
+
+# Your normal README content starts down here...
 # AIM-Env: AI Email Triage RL Environment
 
 AIM-Env is a lightweight, OpenEnv-compliant Reinforcement Learning execution environment where an LLM agent triages a simulated email inbox. It is designed to run as a single Python script inside a minimal Docker container and pass the Round 1 automated grader with a perfect score.
