@@ -1,13 +1,11 @@
-"""
-Medium Task Configuration Module.
-"""
 from env.models import TaskConfig
 
 MEDIUM_TASK_CONFIG = TaskConfig(
+    task_id="aim_medium_001",
     num_emails=7,
-    time_budget=30,
+    max_steps=30,
     seed=137,
-    ambiguity_level=0.2,
+    ambiguity_level=0.4,
     has_phishing=True,
-    time_pressure=0.1
+    time_pressure=True,
 )
