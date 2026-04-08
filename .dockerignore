@@ -1,6 +1,5 @@
 # Frontend / Node.js (not needed in container)
 node_modules/
-.kiro/
 src/
 dist/
 public/
@@ -25,7 +24,6 @@ __pycache__/
 # Environment / secrets
 .env
 **/.env
-backend/.env
 
 # Git / IDE
 .git/
